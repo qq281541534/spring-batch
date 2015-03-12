@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:batch="http://www.springframework.org/schema/batch"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://www.springframework.org/schema/batch
+           http://www.springframework.org/schema/batch/spring-batch.xsd">
+	<!-- 配置Spring Batch的任务持久层 -->
+	<!-- Spring Batch中的事务管理器id最好名为transactionManager -->
+	<!-- 因为在step中配置的transaction-manager属性默认值为transactionManager -->
+	<!-- 配置成其他名称则需要每个步骤都要配这个属性,非常麻烦 -->
+	<!-- 同时注意不要和项目中其他访问数据库的事务管理器id冲突 -->
+    <bean id="transactionManager" class="org.springframework.batch.support.transaction.ResourcelessTransactionManager" lazy-init="true" />
+	<bean id="jobRepository" class="org.springframework.batch.core.repository.support.MapJobRepositoryFactoryBean" />
+	<!-- 配置Spring Batch的job加载器 -->
+	<bean id="jobLauncher" class="org.springframework.batch.core.launch.support.SimpleJobLauncher">
+        <property name="jobRepository" ref="jobRepository"/>
+    </bean>
+    
+    <bean id="stepListener" class="net.blog.csdn.chaijunkun.batch.StepListener" />
+    <bean id="jobListener" class="net.blog.csdn.chaijunkun.batch.JobListener" />
+	
+	<!-- 失败重试模板 -->
+    <bean id="retryTemplate" class="org.springframework.retry.support.RetryTemplate">
+    	<property name="retryPolicy">
+			<!-- 只要发现异常就重试的策略 -->
+    		<bean id="retryPolicy" class="org.springframework.retry.policy.SimpleRetryPolicy">
+    			<property name="maxAttempts" value="5" />
+    		</bean>
+    	</property>
+    	<property name="backOffPolicy">
+    		<!-- 重试补偿策略,失败后间隔预设毫秒后再次重试 -->
+    		<bean id="backOffPolicy" class="org.springframework.retry.backoff.FixedBackOffPolicy">
+    			<property name="backOffPeriod" value="1000" />
+    		</bean>
+    	</property>
+    </bean>
+    
+    <batch:step id="baseStep" abstract="true">
+    	<batch:listeners>
+    		<batch:listener ref="stepListener" />
+    	</batch:listeners>
+    </batch:step>
+	
+	<batch:job id="demoJob" restartable="true">
+		<batch:step id="stepMain" parent="baseStep">
+			<batch:tasklet>
+				<bean id="main" scope="step" class="net.blog.csdn.chaijunkun.batch.StepMain">
+					<property name="retryTemplate" ref="retryTemplate" />
+				</bean>
+			</batch:tasklet>
+			<batch:next on="COMPLETED" to="stepBranch1" />
+			<batch:next on="FAILED" to="stepBranch2" />
+		</batch:step> 
+		<batch:step id="stepBranch1" parent="baseStep">
+			<batch:tasklet>
+				<bean id="branch1" scope="step" class="net.blog.csdn.chaijunkun.batch.StepBranch1" />
+			</batch:tasklet>
+		</batch:step>
+		<batch:step id="stepBranch2" parent="baseStep">
+			<batch:tasklet>
+				<bean id="branch2" scope="step" class="net.blog.csdn.chaijunkun.batch.StepBranch2" />
+			</batch:tasklet>
+		</batch:step>
+		<batch:listeners>
+			<batch:listener ref="jobListener" />
+		</batch:listeners>
+	</batch:job>
+</beans>
